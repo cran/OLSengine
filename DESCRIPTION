@@ -1,0 +1,26 @@
+Package: OLSengine
+Title: Transparent and Assisted Linear Modeling Engine
+Version: 1.0.0
+Authors@R: 
+    person("Manuel", "Soto-Pérez",, "msoto@up.edu.mx", role = c("aut", "cre"))
+Description: A transparent, modular, and base-R implemented statistical engine 
+    for linear regression (OLS), analysis of variance (ANOVA), and logistic 
+    regression (Logit). Designed under the principle of "assisted simplicity", 
+    it features an integrated methodological "customs" (Aduana) that automatically 
+    audits mathematical assumptions (e.g., multicollinearity, heteroskedasticity, 
+    normality, and perfect separation) and outputs publication-ready, APA-formatted 
+    tables. It deliberately avoids hidden heuristics and external dependencies, 
+    ensuring computational transparency and reproducibility for applied research. 
+License: MIT + file LICENSE
+URL: https://github.com/msoto-perez/OLSEngine
+BugReports: https://github.com/msoto-perez/OLSEngine/issues
+Encoding: UTF-8
+RoxygenNote: 7.3.3
+VignetteBuilder: knitr
+Suggests: knitr, rmarkdown
+NeedsCompilation: no
+Packaged: 2026-05-10 13:12:55 UTC; msoto
+Author: Manuel Soto-Pérez [aut, cre]
+Maintainer: Manuel Soto-Pérez <msoto@up.edu.mx>
+Repository: CRAN
+Date/Publication: 2026-05-14 09:10:07 UTC

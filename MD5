@@ -1,0 +1,12 @@
+1081f28fc4d4e0b4b756604fb3ef2e54 *DESCRIPTION
+737e2531901379979eeadf9a0e1018c2 *LICENSE
+ea7cbfa8b51bad735c60478202039e3a *NAMESPACE
+6fbf63d966036732ebff322e066e7f2a *R/OLS_engine.R
+cff9cf74a4a5b55a951123a4fc32562c *README.md
+885912c4f20d8bf338733268b6813fd2 *build/vignette.rds
+e8dc8385cc4125dc224092a7edf7b97f *inst/doc/vignette_tutorial.R
+f31682a9f16128400593a8b213daff77 *inst/doc/vignette_tutorial.Rmd
+a8a210ff632110eba00f1056f27d3570 *inst/doc/vignette_tutorial.html
+7d783d43664475c7045a6d443fe50baf *man/paper_engine.Rd
+eb46355cef8b0eb61118cfcc390fbce8 *man/plot_engine.Rd
+f31682a9f16128400593a8b213daff77 *vignettes/vignette_tutorial.Rmd
