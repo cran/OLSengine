@@ -11,6 +11,14 @@ paper_engine(
   robust = FALSE,
   non_parametric = FALSE,
   paired = FALSE,
+  entity_id = NULL,
+  time_id = NULL,
+  method = "auto",
+  instruments = NULL,
+  treatment_var = NULL,
+  time_var = NULL,
+  treatment_level = NULL,
+  post_level = NULL,
   digits = 2
 )
 }
@@ -20,7 +28,8 @@ paper_engine(
 \item{data}{A data frame containing all variables referenced in \code{formula}.}
 
 \item{model}{A character string indicating the estimation engine.
-One of \code{"ols"} (default), \code{"anova"}, or \code{"logit"}.}
+One of \code{"ols"} (default), \code{"anova"}, \code{"logit"}, \code{"panel"},
+\code{"iv"}, or \code{"did"}.}
 
 \item{robust}{Logical or \code{"auto"}. Controls heteroskedasticity-robust
 standard errors (HC3) for OLS models. If \code{TRUE}, HC3 SEs are always
@@ -35,26 +44,54 @@ Shapiro-Wilk detects non-normality (p < .05). Default is \code{FALSE}.}
 \item{paired}{Logical. If \code{TRUE}, assumes paired/dependent samples
 for ANOVA/t-test models (pre-post designs). Default is \code{FALSE}.}
 
+\item{entity_id}{Character string. Name of the entity/individual identifier
+variable for panel data models. Required when \code{model = "panel"}.}
+
+\item{time_id}{Character string. Name of the time period identifier variable
+for panel data models. Required when \code{model = "panel"}.}
+
+\item{method}{Character string for panel data. One of \code{"auto"} (default,
+uses Hausman test to select between FE and RE), \code{"fe"} (Fixed Effects),
+or \code{"re"} (Random Effects). Only used when \code{model = "panel"}.}
+
+\item{instruments}{A \code{formula} specifying instrumental variables for IV models
+(e.g., \code{~ z1 + z2}). Required when \code{model = "iv"}. Instruments must
+satisfy relevance (correlated with endogenous X) and exogeneity (uncorrelated
+with error term).}
+
+\item{treatment_var}{Character string. Name of the treatment group variable for
+DiD models. Required when \code{model = "did"}.}
+
+\item{time_var}{Character string. Name of the time period variable (pre/post) for
+DiD models. Required when \code{model = "did"}.}
+
+\item{treatment_level}{Character string. Which level of \code{treatment_var}
+represents the treated group. If \code{NULL}, the second level is used.}
+
+\item{post_level}{Character string. Which level of \code{time_var} represents
+the post-treatment period. If \code{NULL}, the second level is used.}
+
 \item{digits}{Integer. Number of decimal places in output tables.
 Default is \code{2}.}
 }
 \value{
 An object of class \code{basic_model}, which is a list containing:
-\describe{
-\item{tables}{A list of formatted data frames with estimation results.}
-\item{diagnostics}{A list of raw diagnostic statistics (p-values, fit indices).}
-\item{messages}{A character vector of methodological guidance messages from the customs layer.}
-\item{method}{A character string indicating the engine used (\code{"ols"}, \code{"anova"}, or \code{"logit"}).}
-\item{data}{The cleaned data frame used for estimation (after listwise deletion).}
-}
+  \describe{
+    \item{tables}{A list of formatted data frames with estimation results.}
+    \item{diagnostics}{A list of raw diagnostic statistics (p-values, fit indices).}
+    \item{messages}{A character vector of methodological guidance messages from the customs layer.}
+    \item{method}{A character string indicating the engine used (\code{"ols"},
+      \code{"anova"}, \code{"logit"}, \code{"panel"}, \code{"iv"}, or \code{"did"}).}
+    \item{data}{The cleaned data frame used for estimation (after listwise deletion).}
+  }
 }
 \description{
-Estimates OLS regression, ANOVA/t-tests, or binary logistic
-regression models using pure base R matrix algebra. Automatically audits
-statistical assumptions through an integrated methodological customs layer
-and returns publication-ready APA-formatted tables. Designed for applied
-researchers and early-career academics who need a single, transparent
-workflow from estimation to reporting.
+Estimates OLS regression, ANOVA/t-tests, binary logistic
+  regression, panel data models, instrumental variables, or difference-in-differences
+  using pure base R matrix algebra. Automatically audits statistical assumptions
+  through an integrated methodological customs layer and returns publication-ready
+  APA-formatted tables. Designed for applied researchers and early-career academics
+  who need a single, transparent workflow from estimation to reporting.
 }
 \examples{
 # OLS example
