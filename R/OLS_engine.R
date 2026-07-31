@@ -179,7 +179,14 @@ anova_engine <- function(formula, data, non_parametric = FALSE, paired = FALSE) 
 
   # 1. DIAGNOSTICS: Normality and Homogeneity
   fit_aov <- aov(formula, data = data)
-  norm_p <- shapiro.test(residuals(fit_aov))$p.value
+  resid_aov <- residuals(fit_aov)
+  if (n_total <= 5000) {
+    norm_p <- shapiro.test(resid_aov)$p.value
+    norm_method <- "Shapiro-Wilk"
+  } else {
+    norm_p <- ks.test(scale(resid_aov), "pnorm")$p.value
+    norm_method <- "Kolmogorov-Smirnov"
+  }
 
   # Levene's Test (Median-based, robust)
   medians <- tapply(y_val, group_val, median, na.rm = TRUE)
@@ -194,7 +201,7 @@ anova_engine <- function(formula, data, non_parametric = FALSE, paired = FALSE) 
   if (identical(non_parametric, "auto")) {
     if (norm_p < 0.05) {
       use_np <- TRUE
-      aduana_msgs <- c(aduana_msgs, "Customs Auto-Pilot: Severe non-normality detected (Shapiro p < .05). Transitioned automatically to Non-Parametric tests to protect validity.")
+      aduana_msgs <- c(aduana_msgs, sprintf("Customs Auto-Pilot: Severe non-normality detected (%s p < .05). Transitioned automatically to Non-Parametric tests to protect validity.", norm_method))
     } else {
       aduana_msgs <- c(aduana_msgs, "Customs Auto-Pilot: Normality assumption met. Parametric tests were used.")
     }
@@ -204,9 +211,9 @@ anova_engine <- function(formula, data, non_parametric = FALSE, paired = FALSE) 
   } else {
     # Default (FALSE)
     if (norm_p < 0.05) {
-      aduana_msgs <- c(aduana_msgs, "CRITICAL WARNING: Non-normal distribution detected (Shapiro p < .05). Parametric results might be biased. Consider using 'non_parametric = TRUE' or 'non_parametric = \"auto\"'.")
+      aduana_msgs <- c(aduana_msgs, sprintf("CRITICAL WARNING: Non-normal distribution detected (%s p < .05). Parametric results might be biased. Consider using 'non_parametric = TRUE' or 'non_parametric = \"auto\"'.", norm_method))
     } else {
-      aduana_msgs <- c(aduana_msgs, "Customs: Normality assumption of residuals is met (Shapiro p > .05).")
+      aduana_msgs <- c(aduana_msgs, sprintf("Customs: Normality assumption of residuals is met (%s p > .05).", norm_method))
     }
   }
 
@@ -285,7 +292,7 @@ anova_engine <- function(formula, data, non_parametric = FALSE, paired = FALSE) 
 
   list(
     effects_table = effects_table,
-    diagnostics = list(n = n_total, levene_p_value = levene_p, norm_p_value = norm_p),
+    diagnostics = list(n = n_total, levene_p_value = levene_p, norm_p_value = norm_p, norm_method = norm_method),
     aduana_msgs = aduana_msgs
   )
 }
@@ -436,7 +443,7 @@ panel_engine <- function(formula, data, entity_id, time_id, method = "auto") {
   # Between estimator (entity-level means)
   entity_data <- aggregate(cbind(y, X), by = list(entities), FUN = mean, na.rm = TRUE)
   y_between <- entity_data[, 2]
-  X_between <- as.matrix(entity_data[, -c(1, 2), drop = FALSE])
+  X_between <- cbind(1, as.matrix(entity_data[, -c(1, 2), drop = FALSE]))
 
   XX_between_inv <- solve(crossprod(X_between))
   beta_between <- as.vector(XX_between_inv %*% crossprod(X_between, y_between))
@@ -444,12 +451,19 @@ panel_engine <- function(formula, data, entity_id, time_id, method = "auto") {
   sigma2_between <- sum(resid_between^2) / (n_entities - k - 1)
 
   # Theta for GLS transformation (Swamy-Arora)
+  # The between regression's residual variance estimates
+  # sigma2_idiosyncratic/T + sigma2_entity, not sigma2_entity alone -- subtract
+  # the idiosyncratic component (from the within estimator) to isolate the
+  # pure entity-level variance before plugging it into theta.
   sigma2_within <- sigma2_fe
   if (is_balanced) {
-    theta <- 1 - sqrt(sigma2_within / (sigma2_within + n_time * sigma2_between))
+    sigma2_entity <- max(0, sigma2_between - sigma2_within / n_time)
+    theta <- 1 - sqrt(sigma2_within / (sigma2_within + n_time * sigma2_entity))
   } else {
     # Average T for unbalanced panels
-    theta <- 1 - sqrt(sigma2_within / (sigma2_within + mean(entity_counts) * sigma2_between))
+    avg_T <- mean(entity_counts)
+    sigma2_entity <- max(0, sigma2_between - sigma2_within / avg_T)
+    theta <- 1 - sqrt(sigma2_within / (sigma2_within + avg_T * sigma2_entity))
   }
 
   # Quasi-demeaned data for RE
@@ -485,27 +499,25 @@ panel_engine <- function(formula, data, entity_id, time_id, method = "auto") {
   # H1: Only FE is consistent (use FE)
   beta_diff <- beta_fe - beta_re
   vcov_diff <- vcov_fe - vcov_re[-1, -1, drop = FALSE]
+  # Force symmetry (guards against floating-point asymmetry) and add a tiny
+  # ridge to guard only against an exactly singular matrix.
+  vcov_diff <- (vcov_diff + t(vcov_diff)) / 2 + diag(1e-10, nrow(vcov_diff))
 
-  # Check if vcov_diff is positive definite
-  eigenvalues <- eigen(vcov_diff, only.values = TRUE)$values
-  if (any(eigenvalues < -1e-10)) {
-    hausman_stat <- NA
-    hausman_p <- NA
-    hausman_warning <- "WARNING: Hausman test covariance matrix is not positive definite. This can occur with highly collinear predictors or small between-entity variation. Test is inconclusive."
-    aduana_msgs <- c(aduana_msgs, hausman_warning)
+  # Match plm::phtest()'s canonical algorithm (see plm:::phtest.panelmodel):
+  # it inverts vcov_diff directly, without checking positive-definiteness,
+  # and takes the absolute value of the resulting quadratic form. A
+  # sampling-variability-driven negative difference is common and expected
+  # in finite samples, not a computational failure, so we replicate that
+  # behavior rather than discarding the result as inconclusive.
+  hausman_stat <- tryCatch({
+    as.numeric(abs(t(beta_diff) %*% solve(vcov_diff) %*% beta_diff))
+  }, error = function(e) NA)
+
+  if (!is.na(hausman_stat)) {
+    hausman_p <- pchisq(hausman_stat, df = k, lower.tail = FALSE)
   } else {
-    # Force symmetry and positive definiteness
-    vcov_diff <- (vcov_diff + t(vcov_diff)) / 2
-    vcov_diff <- vcov_diff + diag(1e-10, nrow(vcov_diff))
-
-    tryCatch({
-      hausman_stat <- as.numeric(t(beta_diff) %*% solve(vcov_diff) %*% beta_diff)
-      hausman_p <- pchisq(hausman_stat, df = k, lower.tail = FALSE)
-    }, error = function(e) {
-      hausman_stat <<- NA
-      hausman_p <<- NA
-      aduana_msgs <<- c(aduana_msgs, "WARNING: Hausman test computation failed numerically. Consider using Fixed Effects as conservative default.")
-    })
+    hausman_p <- NA
+    aduana_msgs <- c(aduana_msgs, "WARNING: Hausman test computation failed numerically (singular covariance difference matrix). Consider using Fixed Effects as conservative default.")
   }
 
   # ============================================
@@ -685,8 +697,10 @@ iv_engine <- function(formula, data, instruments) {
 
   # Standard errors (need to account for first stage uncertainty)
   # Use Z as instrument matrix for variance
-  PZ <- Z_int %*% solve(crossprod(Z_int)) %*% t(Z_int)
-  X_tilde <- PZ %*% X_int
+  # X_tilde = PZ %*% X_int, computed via associativity to avoid forming the
+  # full n x n projection matrix PZ (O(n^2) memory/time -> O(n*k))
+  ZZ_inv_proj <- solve(crossprod(Z_int))
+  X_tilde <- Z_int %*% (ZZ_inv_proj %*% crossprod(Z_int, X_int))
   vcov_2sls <- sigma2_2sls * solve(crossprod(X_tilde))
   se_2sls <- sqrt(diag(vcov_2sls))
 
