@@ -3,7 +3,7 @@
 # Stage 3: Functional Prototype (English Version)
 #################################################
 
-#' @importFrom stats aggregate aov binomial coef cor fitted glm hatvalues kruskal.test ks.test lm median model.matrix na.omit pchisq pf pnorm pt qnorm qt quantile residuals sd setNames shapiro.test t.test wilcox.test
+#' @importFrom stats aggregate aov binomial coef cor fitted glm hatvalues kruskal.test ks.test lm median model.matrix na.omit oneway.test pchisq pf pnorm pt qnorm qt quantile residuals sd setNames shapiro.test t.test wilcox.test
 #' @importFrom graphics abline arrows axis box lines par points text plot legend
 NULL
 
@@ -196,12 +196,25 @@ anova_engine <- function(formula, data, non_parametric = FALSE, paired = FALSE) 
 
   # 2. CUSTOMS DECISION LOGIC (The 3 paths)
   use_np <- FALSE
+  use_welch <- FALSE
   aduana_msgs <- character(0)
 
   if (identical(non_parametric, "auto")) {
     if (norm_p < 0.05) {
-      use_np <- TRUE
-      aduana_msgs <- c(aduana_msgs, sprintf("Customs Auto-Pilot: Severe non-normality detected (%s p < .05). Transitioned automatically to Non-Parametric tests to protect validity.", norm_method))
+      if (levene_p < 0.01) {
+        # Non-normality co-occurs with clear variance heterogeneity: the
+        # residual non-normality may itself be an artifact of unequal
+        # variances rather than genuine skew, so prefer Welch's ANOVA
+        # over a non-parametric test.
+        use_welch <- TRUE
+        aduana_msgs <- c(aduana_msgs, sprintf("Customs Auto-Pilot: %s p < .05, but Levene's test also indicates unequal variances (p = %.3f). This pattern suggests the non-normality result may be driven by heteroscedasticity rather than genuine skew. Switched to Welch's ANOVA instead of a non-parametric test.", norm_method, levene_p))
+      } else if (levene_p <= 0.10) {
+        use_np <- TRUE
+        aduana_msgs <- c(aduana_msgs, sprintf("Customs Auto-Pilot: %s p < .05. Levene's test was inconclusive on variance homogeneity (p = %.3f). Defaulting to Non-Parametric tests; manual inspection of group variances is recommended.", norm_method, levene_p))
+      } else {
+        use_np <- TRUE
+        aduana_msgs <- c(aduana_msgs, sprintf("Customs Auto-Pilot: Severe non-normality detected (%s p < .05) with homogeneous variances confirmed (Levene p = %.3f). Transitioned automatically to Non-Parametric tests to protect validity.", norm_method, levene_p))
+      }
     } else {
       aduana_msgs <- c(aduana_msgs, "Customs Auto-Pilot: Normality assumption met. Parametric tests were used.")
     }
@@ -250,7 +263,19 @@ anova_engine <- function(formula, data, non_parametric = FALSE, paired = FALSE) 
       eff_val <- abs(stat_val) / sqrt(n_total / 2)
     }
   } else {
-    if (use_np) {
+    if (use_welch) {
+      # Variant 1b: Independent Parametric, unequal variances (Welch's ANOVA)
+      test_res <- oneway.test(formula, data = data, var.equal = FALSE)
+      test_name <- "Welch's ANOVA"
+      stat_name <- "F"
+      stat_val <- test_res$statistic
+      p_val <- test_res$p.value
+      df_val <- test_res$parameter[1]
+      eff_name <- "Partial Eta-sq"
+      eff_val <- NA_real_
+
+      aduana_msgs <- c(aduana_msgs, "Note: Partial Eta-sq is not reported for Welch's ANOVA. The conventional sum-of-squares-based formula is inappropriate under heteroscedasticity, and no validated closed-form alternative is implemented in this version.")
+    } else if (use_np) {
       # Variant 2: Independent Non-Parametric (Kruskal/Mann-Whitney)
       test_res <- kruskal.test(formula, data = data)
       test_name <- ifelse(k_groups == 2, "Mann-Whitney U (via Kruskal)", "Kruskal-Wallis")
@@ -870,12 +895,12 @@ did_engine <- function(formula, data, treatment_var, time_var, treatment_level =
       pre_diff_p <- pre_test$p.value
 
       if (pre_diff_p < 0.05) {
-        aduana_msgs <- c(aduana_msgs, sprintf("WARNING (Parallel Trends): Significant pre-treatment difference detected (p = %.3f). The parallel trends assumption may be violated. Consider including covariates or using alternative identification strategies (Roth et al., 2023).", pre_diff_p))
+        aduana_msgs <- c(aduana_msgs, sprintf("WARNING (Pre-Treatment Balance): Treated and control groups differ significantly in pre-treatment levels (p = %.3f). This is a pre-treatment balance check, not a test of parallel trends. Consider including covariates or using alternative identification strategies (Roth et al., 2023).", pre_diff_p))
       } else {
-        aduana_msgs <- c(aduana_msgs, sprintf("INFO: No significant pre-treatment difference (p = %.3f). Parallel trends assumption is plausible but should be verified with visual inspection of trends.", pre_diff_p))
+        aduana_msgs <- c(aduana_msgs, sprintf("INFO: No significant pre-treatment difference in levels detected (p = %.3f). This does not confirm parallel trends, which requires observing group trajectories across multiple pre-treatment periods.", pre_diff_p))
       }
     } else {
-      aduana_msgs <- c(aduana_msgs, "INFO: Insufficient pre-period data for formal parallel trends test. Interpret with caution.")
+      aduana_msgs <- c(aduana_msgs, "INFO: Insufficient pre-period data for a multi-period parallel-trends evaluation; only a single-period balance check was performed.")
     }
   } else {
     aduana_msgs <- c(aduana_msgs, "INFO: No pre-period data available. Parallel trends assumption cannot be tested. Interpret DiD estimate as a conditional difference.")
@@ -1548,7 +1573,7 @@ plot_engine <- function(model_object, y_label = NULL, x_label = NULL) {
   }
 
   # =======================================================
-  # 6. DIFFERENCE-IN-DIFFERENCES PLOT: Parallel Trends
+  # 6. DIFFERENCE-IN-DIFFERENCES PLOT: Pre-Treatment Balance
   # =======================================================
   else if (method == "did") {
     # Get group means data
@@ -1591,7 +1616,8 @@ plot_engine <- function(model_object, y_label = NULL, x_label = NULL) {
     points(x_pos, treated_data$Mean, pch = 21, cex = 2, bg = "white", col = "black")
 
     # Add counterfactual line (dashed) - what treated would have been without treatment
-    # Parallel trend assumption: treated would have increased by same amount as control
+    # Assumes treated would have changed by the same amount as control (the DiD
+    # identifying assumption); this plot compares only pre/post levels, not trends
     control_change <- control_data$Mean[2] - control_data$Mean[1]
     counterfactual_post <- treated_data$Mean[1] + control_change
 
