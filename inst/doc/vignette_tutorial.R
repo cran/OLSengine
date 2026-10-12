@@ -26,7 +26,8 @@ group_data <- data.frame(
   group = rep(c("Control", "Treatment A", "Treatment B"), each = 30)
 )
 
-# Auto-pilot switches to non-parametric if normality fails
+# Auto-pilot: if residual normality is rejected, Levene's test (Brown-Forsythe)
+# routes to Welch's ANOVA (p <= .10) or Kruskal-Wallis (p > .10)
 model_anova <- paper_engine(score ~ group, data = group_data, 
                             model = "anova", non_parametric = "auto")
 
@@ -121,7 +122,7 @@ model_did <- paper_engine(outcome ~ 1,
 
 model_did$tables$Table2_DiD_Estimation
 model_did$tables$Group_Means
-model_did$messages  # Reports pre-treatment balance check
+model_did$messages  # Reports the descriptive pre-treatment comparison
 plot_engine(model_did)
 
 ## -----------------------------------------------------------------------------
